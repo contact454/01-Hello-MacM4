@@ -1,1 +1,1 @@
-Trigger temporary Hokus German transcription workflow — proxy fallback retry 3.
+Trigger temporary Whisper model transfer — retry 4.
