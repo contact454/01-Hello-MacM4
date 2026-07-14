@@ -1,1 +1,1 @@
-Trigger temporary Whisper base model transfer — retry 5.
+Trigger temporary Whisper tiny model transfer — retry 6.
