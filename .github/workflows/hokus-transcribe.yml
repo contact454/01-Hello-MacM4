@@ -22,14 +22,55 @@ jobs:
       - name: Download source audio
         shell: bash
         run: |
-          set -euxo pipefail
+          set -u
           mkdir -p hokus-output
           URL='https://www.youtube.com/watch?v=rUMuHO09O_0'
           OUT='hokus-output/source.%(ext)s'
-          yt-dlp --no-playlist --extractor-args 'youtube:player_client=android_vr' -f 'bestaudio/best' -o "$OUT" "$URL" || \
-          yt-dlp --no-playlist --extractor-args 'youtube:player_client=tv_embedded' -f 'bestaudio/best' -o "$OUT" "$URL" || \
-          yt-dlp --no-playlist --extractor-args 'youtube:player_client=web_safari' -f 'bestaudio/best' -o "$OUT" "$URL" || \
-          yt-dlp --no-playlist --extractor-args 'youtube:player_client=android' -f 'bestaudio/best' -o "$OUT" "$URL"
+          yt-dlp --no-playlist --extractor-args 'youtube:player_client=android_vr' -f 'bestaudio/best' -o "$OUT" "$URL" || true
+          if ! find hokus-output -maxdepth 1 -type f -name 'source.*' | grep -q .; then
+            cat > /tmp/fallback.py <<'PY'
+          import requests, sys, os
+          vid='rUMuHO09O_0'
+          out='hokus-output/source.m4a'
+          S=requests.Session(); S.headers['User-Agent']='Mozilla/5.0'
+          def save(url):
+              try:
+                  with S.get(url,stream=True,timeout=30,allow_redirects=True) as r:
+                      r.raise_for_status()
+                      with open(out,'wb') as f:
+                          for c in r.iter_content(1024*1024):
+                              if c: f.write(c)
+                  return os.path.getsize(out)>100000
+              except Exception as e:
+                  print('download failed',e); return False
+          try:
+              inst=S.get('https://api.invidious.io/instances.json?sort_by=health',timeout=20).json()
+              for host,meta in inst:
+                  if not meta.get('api') or meta.get('type')!='https': continue
+                  base='https://'+host
+                  try:
+                      j=S.get(f'{base}/api/v1/videos/{vid}',timeout=15).json()
+                      fm=[x for x in j.get('adaptiveFormats',[]) if str(x.get('type','')).startswith('audio/') and x.get('url')]
+                      fm.sort(key=lambda x:int(x.get('bitrate',0)),reverse=True)
+                      if fm and save(fm[0]['url']): print('used',base); sys.exit(0)
+                  except Exception as e: print('invidious',host,e)
+          except Exception as e: print('instance list',e)
+          try:
+              inst=S.get('https://piped.video/api/v1/instances',timeout=20).json()
+              for x in inst:
+                  base=x.get('api_url') or x.get('apiUrl')
+                  if not base: continue
+                  try:
+                      j=S.get(f'{base}/streams/{vid}',timeout=15).json()
+                      fm=[a for a in j.get('audioStreams',[]) if a.get('url')]
+                      fm.sort(key=lambda a:int(a.get('bitrate',0) or 0),reverse=True)
+                      if fm and save(fm[0]['url']): print('used',base); sys.exit(0)
+                  except Exception as e: print('piped',base,e)
+          except Exception as e: print('piped list',e)
+          sys.exit(1)
+          PY
+            python /tmp/fallback.py
+          fi
           SRC=$(find hokus-output -maxdepth 1 -type f -name 'source.*' | head -n 1)
           test -n "$SRC"
           ffmpeg -y -i "$SRC" -vn -ac 1 -ar 16000 hokus-output/source.wav
