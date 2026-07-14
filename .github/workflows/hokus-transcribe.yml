@@ -1,105 +1,27 @@
-name: Hokus temporary transcription
+name: Hokus temporary model transfer
 
 on:
   pull_request:
   workflow_dispatch:
 
 jobs:
-  transcribe:
+  fetch-model:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
+      - name: Download Whisper small model
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg jq
-          python -m pip install --upgrade pip
-          pip install --upgrade yt-dlp faster-whisper requests
-      - name: Download source audio
-        shell: bash
-        run: |
-          set -u
-          mkdir -p hokus-output
-          URL='https://www.youtube.com/watch?v=rUMuHO09O_0'
-          OUT='hokus-output/source.%(ext)s'
-          yt-dlp --no-playlist --extractor-args 'youtube:player_client=android_vr' -f 'bestaudio/best' -o "$OUT" "$URL" || true
-          if ! find hokus-output -maxdepth 1 -type f -name 'source.*' | grep -q .; then
-            cat > /tmp/fallback.py <<'PY'
-          import requests, sys, os
-          vid='rUMuHO09O_0'
-          out='hokus-output/source.m4a'
-          S=requests.Session(); S.headers['User-Agent']='Mozilla/5.0'
-          def save(url):
-              try:
-                  with S.get(url,stream=True,timeout=30,allow_redirects=True) as r:
-                      r.raise_for_status()
-                      with open(out,'wb') as f:
-                          for c in r.iter_content(1024*1024):
-                              if c: f.write(c)
-                  return os.path.getsize(out)>100000
-              except Exception as e:
-                  print('download failed',e); return False
-          try:
-              inst=S.get('https://api.invidious.io/instances.json?sort_by=health',timeout=20).json()
-              for host,meta in inst:
-                  if not meta.get('api') or meta.get('type')!='https': continue
-                  base='https://'+host
-                  try:
-                      j=S.get(f'{base}/api/v1/videos/{vid}',timeout=15).json()
-                      fm=[x for x in j.get('adaptiveFormats',[]) if str(x.get('type','')).startswith('audio/') and x.get('url')]
-                      fm.sort(key=lambda x:int(x.get('bitrate',0)),reverse=True)
-                      if fm and save(fm[0]['url']): print('used',base); sys.exit(0)
-                  except Exception as e: print('invidious',host,e)
-          except Exception as e: print('instance list',e)
-          try:
-              inst=S.get('https://piped.video/api/v1/instances',timeout=20).json()
-              for x in inst:
-                  base=x.get('api_url') or x.get('apiUrl')
-                  if not base: continue
-                  try:
-                      j=S.get(f'{base}/streams/{vid}',timeout=15).json()
-                      fm=[a for a in j.get('audioStreams',[]) if a.get('url')]
-                      fm.sort(key=lambda a:int(a.get('bitrate',0) or 0),reverse=True)
-                      if fm and save(fm[0]['url']): print('used',base); sys.exit(0)
-                  except Exception as e: print('piped',base,e)
-          except Exception as e: print('piped list',e)
-          sys.exit(1)
+          mkdir -p whisper-model
+          python - <<'PY'
+          import urllib.request
+          url='https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt'
+          urllib.request.urlretrieve(url,'whisper-model/small.pt')
           PY
-            python /tmp/fallback.py
-          fi
-          SRC=$(find hokus-output -maxdepth 1 -type f -name 'source.*' | head -n 1)
-          test -n "$SRC"
-          ffmpeg -y -i "$SRC" -vn -ac 1 -ar 16000 hokus-output/source.wav
-      - name: Transcribe German with word timestamps
-        run: |
-          cat > /tmp/transcribe.py <<'PY'
-          import json
-          from faster_whisper import WhisperModel
-          model = WhisperModel('medium', device='cpu', compute_type='int8')
-          segments, info = model.transcribe(
-              'hokus-output/source.wav', language='de', task='transcribe',
-              beam_size=5, best_of=5, vad_filter=True,
-              word_timestamps=True, condition_on_previous_text=True,
-          )
-          out=[]
-          for s in segments:
-              words=[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in (s.words or [])]
-              out.append({'start':s.start,'end':s.end,'text':s.text.strip(),'words':words,'avg_logprob':s.avg_logprob,'no_speech_prob':s.no_speech_prob})
-          with open('hokus-output/transcript.json','w',encoding='utf-8') as f:
-              json.dump({'language':info.language,'duration':info.duration,'segments':out},f,ensure_ascii=False,indent=2)
-          with open('hokus-output/transcript.txt','w',encoding='utf-8') as f:
-              for x in out:
-                  f.write(f"[{x['start']:.3f} --> {x['end']:.3f}] {x['text']}\n")
-          PY
-          python /tmp/transcribe.py
+          ls -lh whisper-model/small.pt
       - uses: actions/upload-artifact@v4
         with:
-          name: hokus-transcript
-          path: |
-            hokus-output/transcript.json
-            hokus-output/transcript.txt
+          name: whisper-small-model
+          path: whisper-model/small.pt
+          compression-level: 0
           retention-days: 1
