@@ -1,0 +1,68 @@
+name: Hokus temporary transcription
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hokus-transcribe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install yt-dlp faster-whisper
+      - name: Download source audio
+        run: |
+          mkdir -p hokus-output
+          yt-dlp --no-playlist -f 'bestaudio/best' -o 'hokus-output/source.%(ext)s' 'https://www.youtube.com/watch?v=rUMuHO09O_0'
+          ffmpeg -y -i hokus-output/source.* -ac 1 -ar 16000 hokus-output/source.wav
+      - name: Transcribe German with word timestamps
+        run: |
+          cat > /tmp/transcribe.py <<'PY'
+          import json
+          from faster_whisper import WhisperModel
+          model = WhisperModel('medium', device='cpu', compute_type='int8')
+          segments, info = model.transcribe(
+              'hokus-output/source.wav',
+              language='de',
+              task='transcribe',
+              beam_size=5,
+              best_of=5,
+              vad_filter=True,
+              word_timestamps=True,
+              condition_on_previous_text=True,
+          )
+          out=[]
+          for s in segments:
+              words=[]
+              for w in (s.words or []):
+                  words.append({'start':w.start,'end':w.end,'word':w.word,'probability':w.probability})
+              out.append({'start':s.start,'end':s.end,'text':s.text.strip(),'words':words,'avg_logprob':s.avg_logprob,'no_speech_prob':s.no_speech_prob})
+          with open('hokus-output/transcript.json','w',encoding='utf-8') as f:
+              json.dump({'language':info.language,'duration':info.duration,'segments':out},f,ensure_ascii=False,indent=2)
+          with open('hokus-output/transcript.txt','w',encoding='utf-8') as f:
+              for x in out:
+                  f.write(f"[{x['start']:.3f} --> {x['end']:.3f}] {x['text']}\n")
+          PY
+          python /tmp/transcribe.py
+      - name: Commit transcript
+        run: |
+          rm -f hokus-output/source.* hokus-output/source.wav
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add hokus-output/transcript.json hokus-output/transcript.txt
+          git commit -m 'Add temporary Hokus transcript' || exit 0
+          git push
