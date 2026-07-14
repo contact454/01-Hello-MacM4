@@ -16,14 +16,23 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg jq
           python -m pip install --upgrade pip
-          pip install yt-dlp faster-whisper
+          pip install --upgrade yt-dlp faster-whisper requests
       - name: Download source audio
+        shell: bash
         run: |
+          set -euxo pipefail
           mkdir -p hokus-output
-          yt-dlp --no-playlist -f 'bestaudio/best' -o 'hokus-output/source.%(ext)s' 'https://www.youtube.com/watch?v=rUMuHO09O_0'
-          ffmpeg -y -i hokus-output/source.* -ac 1 -ar 16000 hokus-output/source.wav
+          URL='https://www.youtube.com/watch?v=rUMuHO09O_0'
+          OUT='hokus-output/source.%(ext)s'
+          yt-dlp --no-playlist --extractor-args 'youtube:player_client=android_vr' -f 'bestaudio/best' -o "$OUT" "$URL" || \
+          yt-dlp --no-playlist --extractor-args 'youtube:player_client=tv_embedded' -f 'bestaudio/best' -o "$OUT" "$URL" || \
+          yt-dlp --no-playlist --extractor-args 'youtube:player_client=web_safari' -f 'bestaudio/best' -o "$OUT" "$URL" || \
+          yt-dlp --no-playlist --extractor-args 'youtube:player_client=android' -f 'bestaudio/best' -o "$OUT" "$URL"
+          SRC=$(find hokus-output -maxdepth 1 -type f -name 'source.*' | head -n 1)
+          test -n "$SRC"
+          ffmpeg -y -i "$SRC" -vn -ac 1 -ar 16000 hokus-output/source.wav
       - name: Transcribe German with word timestamps
         run: |
           cat > /tmp/transcribe.py <<'PY'
