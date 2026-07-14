@@ -1,13 +1,8 @@
 name: Hokus temporary transcription
 
 on:
-  push:
-    paths:
-      - '.github/workflows/hokus-transcribe.yml'
+  pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   transcribe:
@@ -36,20 +31,13 @@ jobs:
           from faster_whisper import WhisperModel
           model = WhisperModel('medium', device='cpu', compute_type='int8')
           segments, info = model.transcribe(
-              'hokus-output/source.wav',
-              language='de',
-              task='transcribe',
-              beam_size=5,
-              best_of=5,
-              vad_filter=True,
-              word_timestamps=True,
-              condition_on_previous_text=True,
+              'hokus-output/source.wav', language='de', task='transcribe',
+              beam_size=5, best_of=5, vad_filter=True,
+              word_timestamps=True, condition_on_previous_text=True,
           )
           out=[]
           for s in segments:
-              words=[]
-              for w in (s.words or []):
-                  words.append({'start':w.start,'end':w.end,'word':w.word,'probability':w.probability})
+              words=[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in (s.words or [])]
               out.append({'start':s.start,'end':s.end,'text':s.text.strip(),'words':words,'avg_logprob':s.avg_logprob,'no_speech_prob':s.no_speech_prob})
           with open('hokus-output/transcript.json','w',encoding='utf-8') as f:
               json.dump({'language':info.language,'duration':info.duration,'segments':out},f,ensure_ascii=False,indent=2)
@@ -58,11 +46,10 @@ jobs:
                   f.write(f"[{x['start']:.3f} --> {x['end']:.3f}] {x['text']}\n")
           PY
           python /tmp/transcribe.py
-      - name: Commit transcript
-        run: |
-          rm -f hokus-output/source.* hokus-output/source.wav
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add hokus-output/transcript.json hokus-output/transcript.txt
-          git commit -m 'Add temporary Hokus transcript' || exit 0
-          git push
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hokus-transcript
+          path: |
+            hokus-output/transcript.json
+            hokus-output/transcript.txt
+          retention-days: 1
