@@ -10,18 +10,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Download Whisper small model
+      - name: Download Whisper base model
         run: |
           mkdir -p whisper-model
           python - <<'PY'
           import urllib.request
-          url='https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt'
-          urllib.request.urlretrieve(url,'whisper-model/small.pt')
+          url='https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6c6326e34e/base.pt'
+          urllib.request.urlretrieve(url,'whisper-model/base.pt')
           PY
-          ls -lh whisper-model/small.pt
+          ls -lh whisper-model/base.pt
       - uses: actions/upload-artifact@v4
         with:
-          name: whisper-small-model
-          path: whisper-model/small.pt
+          name: whisper-base-model
+          path: whisper-model/base.pt
           compression-level: 0
           retention-days: 1
